@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from api.schemas.chat import (
     QuestionRequest,
@@ -14,23 +15,34 @@ router = APIRouter()
 @router.post("/ask", response_model=QuestionResponse)
 def ask_question(request: QuestionRequest):
 
-    result = ask_rag(request.question)
+    try:
 
-    return QuestionResponse(
-        question=result.question,
-        answer=result.answer,
+        result = ask_rag(request.question)
 
-        chunks=[
-            ChunkResponse(
-                node_id=chunk.node_id,
-                node_type=chunk.node_type,
-                article_number=chunk.article_number,
-                text=chunk.text,
-                score=chunk.score,
-                source=chunk.source
-            )
-            for chunk in result.chunks
-        ],
+        return QuestionResponse(
+            question=result.question,
+            answer=result.answer,
 
-        elapsed_ms=result.elapsed_ms
-    )
+            chunks=[
+                ChunkResponse(
+                    node_id=chunk.node_id,
+                    node_type=chunk.node_type,
+                    article_number=chunk.article_number,
+                    text=chunk.text,
+                    score=chunk.score,
+                    source=chunk.source
+                )
+                for chunk in result.chunks
+            ],
+
+            elapsed_ms=result.elapsed_ms
+        )
+
+    except Exception as e:
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e)
+            }
+        )
