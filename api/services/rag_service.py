@@ -1,3 +1,8 @@
-def ask_rag(question: str) -> str:
+from app.rag import answer_question
 
-    return f"GraphRAG answer for: {question}"
+
+def ask_rag(question: str):
+
+    result = answer_question(question)
+
+    return result
