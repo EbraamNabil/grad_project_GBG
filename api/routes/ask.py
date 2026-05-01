@@ -1,10 +1,11 @@
+from api.core.logger import logger
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from api.schemas.chat import (
     QuestionRequest,
     QuestionResponse,
-    ChunkResponse
+    SourceResponse
 )
 
 from api.services.rag_service import ask_rag
@@ -13,33 +14,38 @@ router = APIRouter()
 
 
 @router.post("/ask", response_model=QuestionResponse)
+   
 def ask_question(request: QuestionRequest):
-
+  
     try:
-
+        logger.info(f"Question received: {request.question}") # to log the incoming question
         result = ask_rag(request.question)
+        logger.info("RAG response generated successfully")
+
+        sources = []
+
+        for chunk in result.chunks[:3]:
+
+            excerpt = chunk.text[:300]
+
+            sources.append(
+                SourceResponse(
+                    article=chunk.article_number,
+                    excerpt=excerpt,
+                    score=round(chunk.score, 3)
+                )
+            )
 
         return QuestionResponse(
             question=result.question,
             answer=result.answer,
-
-            chunks=[
-                ChunkResponse(
-                    node_id=chunk.node_id,
-                    node_type=chunk.node_type,
-                    article_number=chunk.article_number,
-                    text=chunk.text,
-                    score=chunk.score,
-                    source=chunk.source
-                )
-                for chunk in result.chunks
-            ],
-
+            sources=sources,
             elapsed_ms=result.elapsed_ms
         )
 
     except Exception as e:
 
+        logger.error(f"Error occurred while processing question: {e}")
         return JSONResponse(
             status_code=500,
             content={

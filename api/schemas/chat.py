@@ -6,17 +6,14 @@ class QuestionRequest(BaseModel):
     question: str
 
 
-class ChunkResponse(BaseModel):
-    node_id: str
-    node_type: str
-    article_number: int | None
-    text: str
+class SourceResponse(BaseModel):
+    article: int | None
+    excerpt: str
     score: float
-    source: str
 
 
 class QuestionResponse(BaseModel):
     question: str
     answer: str
-    chunks: List[ChunkResponse]
+    sources: List[SourceResponse]
     elapsed_ms: Dict[str, int]
