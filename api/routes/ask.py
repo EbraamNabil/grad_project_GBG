@@ -5,14 +5,16 @@ from api.schemas.chat import (
     QuestionResponse,
 )
 
+from api.services.rag_service import ask_rag
+
 router = APIRouter()
 
 
 @router.post("/ask", response_model=QuestionResponse)
 def ask_question(request: QuestionRequest):
 
-    question = request.question
+    answer = ask_rag(request.question)
 
     return QuestionResponse(
-        answer=f"You asked: {question}"
+        answer=answer
     )
