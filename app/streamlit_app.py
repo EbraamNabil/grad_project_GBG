@@ -13,7 +13,9 @@ import re
 
 
 from streamlit_mic_recorder import speech_to_text
-
+import speech_recognition as sr 
+import io 
+import wave
 
 
 from streamlit_agraph import (

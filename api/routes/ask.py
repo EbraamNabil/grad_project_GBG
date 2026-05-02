@@ -10,8 +10,7 @@ from api.schemas.chat import (
 
 from api.services.rag_service import ask_rag
 
-router = APIRouter()
-
+router = APIRouter() #  we used APIRouter to create a router for our ask endpoint, which allows us to modularize our API and keep related routes together.
 
 @router.post("/ask", response_model=QuestionResponse)
    
@@ -47,7 +46,7 @@ def ask_question(request: QuestionRequest):
 
         logger.error(f"Error occurred while processing question: {e}")
         return JSONResponse(
-            status_code=500,
+            status_code=500,# 500 indicates an internal server error, which is appropriate here since we're catching a general exception that could be caused by various issues in the RAG process.
             content={
                 "error": str(e)
             }
