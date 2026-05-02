@@ -107,11 +107,17 @@ if submit and question.strip():
     if not response.chunks:
         st.warning("لم نجد نصوصاً مطابقة في القانون. حاول إعادة صياغة السؤال.")
     else:
+        # Show explicit-ref banner if the question named specific articles
+        if response.detected_refs:
+            refs_str = "، ".join(f"المادة {n}" for n in response.detected_refs)
+            st.info(f"📌 تم رصد إشارة صريحة في السؤال إلى: **{refs_str}** — تم جلبها مباشرة من القانون.")
+
         st.markdown("### الإجابة")
         st.markdown(response.answer)
 
         st.caption(
-            f"⏱️ زمن الاستجابة: تضمين {response.elapsed_ms.get('embed', 0)} ms · "
+            f"⏱️ زمن الاستجابة: توجيه {response.elapsed_ms.get('route', 0)} ms · "
+            f"تضمين {response.elapsed_ms.get('embed', 0)} ms · "
             f"استرجاع {response.elapsed_ms.get('retrieve', 0)} ms · "
             f"توليد {response.elapsed_ms.get('generate', 0)} ms · "
             f"الإجمالي {sum(response.elapsed_ms.values())} ms"
@@ -120,12 +126,19 @@ if submit and question.strip():
         with st.expander(f"📚 المصادر المرجعية ({len(response.chunks)} قطعة)", expanded=False):
             for i, c in enumerate(response.chunks, start=1):
                 source_label = {
-                    "primary": "🎯 نتيجة أساسية",
+                    "explicit": "📌 مادة مطلوبة صراحة",
+                    "primary": "🎯 نتيجة أساسية (بحث متجهي)",
                     "definition": "📖 تعريف موسّع",
                     "cross_ref": "🔗 مادة مُحال إليها",
                 }.get(c.source, c.source)
 
-                score_text = f"تشابه: {c.score:.3f}" if c.score > 0 else "توسعة من الرسم البياني"
+                if c.source == "explicit":
+                    score_text = "جلب مباشر من قاعدة البيانات"
+                elif c.score > 0:
+                    score_text = f"تشابه: {c.score:.3f}"
+                else:
+                    score_text = "توسعة من الرسم البياني"
+
                 st.markdown(
                     f"**{i}. {source_label}** — `{c.node_id}` · {score_text}"
                 )
