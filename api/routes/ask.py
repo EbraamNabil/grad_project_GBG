@@ -16,10 +16,10 @@ router = APIRouter()
 @router.post("/ask", response_model=QuestionResponse)
 def ask_question(request: QuestionRequest):
     try:
-        logger.info(f"Question received: {request.question}")
-        result = ask_rag(request.question, primary_k=request.primary_k)
+        logger.info(f"Question received [mode={request.mode}]: {request.question}")
+        result = ask_rag(request.question, mode=request.mode, primary_k=request.primary_k)
         logger.info(
-            f"RAG response: {len(result.chunks)} chunks, "
+            f"RAG response [mode={request.mode}]: {len(result.chunks)} chunks, "
             f"detected_refs={result.detected_refs}, "
             f"elapsed={result.elapsed_ms}"
         )

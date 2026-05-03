@@ -40,13 +40,33 @@ from embed_azure import make_client as make_embed_client  # noqa: E402
 from load_neo4j import driver as make_neo4j_driver       # noqa: E402
 from normalize import parse_arabic_int                    # noqa: E402
 
+# ── Modes ─────────────────────────────────────────────────────────────────────
+MODE_USER = "user"        # general public — strict, conservative, citation-only
+MODE_LAWYER = "lawyer"    # lawyer's assistant — analytical, strategic, can opine
+VALID_MODES = {MODE_USER, MODE_LAWYER}
+DEFAULT_MODE = MODE_USER
+
 # ── Tunables ──────────────────────────────────────────────────────────────────
-PRIMARY_K = 5            # vector-search top-K per index, merged then re-ranked by score
-DEFINITIONS_PER_ARTICLE = 3   # graph-expansion budget for [:USES_TERM]
-CROSSREFS_PER_ARTICLE = 2     # graph-expansion budget for [:REFERENCES]
-MAX_CONTEXT_CHUNKS = 12  # hard cap on chunks sent to the LLM
+# Per-mode retrieval depth: lawyer mode pulls more chunks for case analysis.
+RETRIEVAL_PROFILES = {
+    MODE_USER: {
+        "primary_k": 5,
+        "definitions_per_article": 3,
+        "crossrefs_per_article": 2,
+        "max_context_chunks": 12,
+        "max_tokens": 2048,
+    },
+    MODE_LAWYER: {
+        "primary_k": 8,
+        "definitions_per_article": 5,
+        "crossrefs_per_article": 4,
+        "max_context_chunks": 20,
+        "max_tokens": 4096,
+    },
+}
+
+PRIMARY_K = RETRIEVAL_PROFILES[DEFAULT_MODE]["primary_k"]   # back-compat default
 LLM_TEMPERATURE = 0.0    # deterministic for legal text
-LLM_MAX_TOKENS = 2048     # answer should be concise
 TOTAL_ARTICLES = 298     # used to validate detected refs
 RANGE_MAX_SPAN = 50      # safety cap on "المواد X إلى Y" expansion
 
@@ -247,13 +267,58 @@ def _dedupe_and_cap(chunks: list[RetrievedChunk], cap: int) -> list[RetrievedChu
 
 # ── Prompt construction ───────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """أنت مساعد قانوني متخصص في قانون العمل المصري رقم 14 لسنة 2025.
+# General-public mode — strict, conservative, citation-only.
+SYSTEM_PROMPT_USER = """أنت مساعد قانوني متخصص في قانون العمل المصري رقم 14 لسنة 2025.
 أجب فقط بناءً على النصوص المرفقة من القانون.
+
+قواعد الاستشهاد:
 - اذكر رقم المادة في إجابتك (مثال: "وفقاً للمادة 47").
-- إذا ذكر السؤال مادة محددة، ركّز إجابتك على نص تلك المادة المعروض في قسم [المواد المطلوبة صراحة].
+- إذا ذكر السؤال مادة محددة، ابدأ إجابتك بنص تلك المادة المعروض في قسم [المواد المطلوبة صراحة].
+- **مهم جداً:** إذا أحالت المادة المطلوبة إلى مواد أخرى (مثلاً "المادة 40 من هذا القانون")، فاذكر نص تلك المواد الأخرى صراحةً إذا كانت متوفرة في قسم [المواد المُحال إليها]. لا تكتفِ بذكر رقمها بل اقتبس نصها أو لخّصه بدقة، حتى يكون السياق كاملاً للقارئ.
+- استخدم الصياغة: "وتُحيل هذه المادة إلى المادة (X) التي تنص على: …".
+
+قواعد عامة:
 - إذا كانت الإجابة غير موجودة في النصوص المرفقة، قل: "لا تتوفر إجابة قاطعة في النصوص المتاحة".
 - لا تخترع أرقام مواد ولا تفترض محتوى غير مذكور.
 - أجب بالعربية الفصحى، وبشكل موجز ومباشر."""
+
+
+# Lawyer's-assistant mode — analytical, strategic, may give qualified legal opinion.
+SYSTEM_PROMPT_LAWYER = """أنت مساعد قانوني متخصص (Legal Associate) لمحامٍ متمرّس يمارس قانون العمل المصري رقم 14 لسنة 2025.
+المحامي هو من سيستخدم إجابتك في عمله — لذلك تحدث معه بلغة قانونية احترافية، لا بلغة الجمهور العام.
+
+دورك يشمل:
+1. **تحليل القضايا** التي يعرضها عليك المحامي وتحديد المواد ذات الصلة وكيفية انطباقها على وقائع القضية.
+2. **مراجعة حجج الطرف الآخر** وتحليل قوّتها قانونياً، واقتراح طرق الردّ عليها.
+3. **اقتراح خطوط دفاع أو هجوم** مبنية على نصوص القانون.
+4. **شرح الفروقات الدقيقة** بين المواد المتشابهة (مثال: عقد محدد المدة vs غير محدد).
+5. **تنبيه المحامي إلى نقاط الضعف** في موقف موكّله إن وُجدت — التقييم الصادق أهم من التأييد.
+6. **تقديم تحليل استراتيجي**، لا مجرد سرد للنصوص.
+
+قواعد صارمة:
+- استند دائماً إلى النصوص المرفقة من القانون، واذكر أرقام المواد بدقة (مثال: "بنص المادة 47").
+- ميّز بوضوح بين النص القانوني الصريح والتفسير القانوني:
+  • للنص الصريح استخدم: "تنص المادة … على …"
+  • للتفسير أو الرأي القانوني استخدم: "في تحليلي القانوني …" أو "يُفهم من نص المادة … أنّ …".
+- **عند تحليل أي مادة محددة:** إذا أحالت إلى مواد أخرى، فاقتبس نص تلك المواد الأخرى من قسم [المواد المُحال إليها] أو لخّصها بدقة. لا تكتفِ بذكر رقمها — السياق الكامل ضروري للتحليل القانوني السليم.
+- إذا كانت معطيات القضية ناقصة لاتخاذ موقف، اطلب من المحامي تحديداً ما يحتاج إلى توضيح.
+- لا تخترع أرقام مواد، ولا تستشهد بنص غير موجود في النصوص المرفقة.
+- إذا تعذّر بناء حجة قوية من النصوص المتوفرة، قل ذلك بصراحة بدلاً من اختلاق حجج ضعيفة.
+- نظّم إجابتك في أقسام واضحة عند الحاجة:
+  • **تحليل الموقف**
+  • **المواد ذات الصلة** (مع نصوصها كاملة أو ملخصة)
+  • **التحليل القانوني**
+  • **التوصية الاستراتيجية**
+- لغة قانونية احترافية لكن واضحة. تجنّب الحشو والمجاملات.
+"""
+
+
+def _system_prompt_for(mode: str) -> str:
+    return SYSTEM_PROMPT_LAWYER if mode == MODE_LAWYER else SYSTEM_PROMPT_USER
+
+
+# Backward-compat alias for any existing imports.
+SYSTEM_PROMPT = SYSTEM_PROMPT_USER
 
 
 def _build_user_message(question: str, chunks: list[RetrievedChunk]) -> str:
@@ -291,25 +356,51 @@ def _build_user_message(question: str, chunks: list[RetrievedChunk]) -> str:
     return "\n".join(parts)
 
 
-def _call_chat(question: str, chunks: list[RetrievedChunk]) -> str:
+def _call_chat(
+    question: str,
+    chunks: list[RetrievedChunk],
+    mode: str,
+    max_tokens: int,
+) -> str:
     client = make_embed_client()
     deployment = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4.1")
     user_msg = _build_user_message(question, chunks)
     resp = client.chat.completions.create(
         model=deployment,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _system_prompt_for(mode)},
             {"role": "user", "content": user_msg},
         ],
         temperature=LLM_TEMPERATURE,
-        max_tokens=LLM_MAX_TOKENS,
+        max_tokens=max_tokens,
     )
     return resp.choices[0].message.content or ""
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
+def answer_question(
+    question: str,
+    primary_k: int | None = None,
+    mode: str = DEFAULT_MODE,
+) -> RagResponse:
+    """Run the full RAG pipeline.
+
+    Args:
+        question: user's question (Arabic).
+        primary_k: vector-search top-K override; default comes from the mode profile.
+        mode: "user" (general public, conservative) or "lawyer" (analytical assistant).
+    """
+    if mode not in VALID_MODES:
+        mode = DEFAULT_MODE
+    profile = RETRIEVAL_PROFILES[mode]
+    if primary_k is None:
+        primary_k = profile["primary_k"]
+    defs_budget = profile["definitions_per_article"]
+    refs_budget = profile["crossrefs_per_article"]
+    max_chunks = profile["max_context_chunks"]
+    max_tokens = profile["max_tokens"]
+
     elapsed: dict[str, int] = {}
 
     # Step 0 — query routing (regex, no API calls)
@@ -332,16 +423,16 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
         seed_ids = list({
             c.node_id for c in (explicit + primary) if c.node_type == "Article"
         })
-        defs = _expand_via_uses_term(session, seed_ids, DEFINITIONS_PER_ARTICLE)
-        refs = _expand_via_references(session, seed_ids, CROSSREFS_PER_ARTICLE)
+        defs = _expand_via_uses_term(session, seed_ids, defs_budget)
+        refs = _expand_via_references(session, seed_ids, refs_budget)
     elapsed["retrieve"] = int((time.perf_counter() - t0) * 1000)
 
     # Order: explicit (highest priority) → primary → definitions → cross-refs
-    chunks = _dedupe_and_cap(explicit + primary + defs + refs, cap=MAX_CONTEXT_CHUNKS)
+    chunks = _dedupe_and_cap(explicit + primary + defs + refs, cap=max_chunks)
 
     # Step 3 — generate
     t0 = time.perf_counter()
-    answer = _call_chat(question, chunks)
+    answer = _call_chat(question, chunks, mode=mode, max_tokens=max_tokens)
     elapsed["generate"] = int((time.perf_counter() - t0) * 1000)
 
     return RagResponse(
@@ -356,10 +447,13 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Headless RAG query test")
     ap.add_argument("question", help="Arabic question about Egyptian Labor Law 14/2025")
-    ap.add_argument("--k", type=int, default=PRIMARY_K)
+    ap.add_argument("--k", type=int, default=None,
+                    help="Vector-search top-K (default: per-mode profile)")
+    ap.add_argument("--mode", choices=list(VALID_MODES), default=DEFAULT_MODE,
+                    help="user (general) or lawyer (analytical)")
     args = ap.parse_args()
 
-    resp = answer_question(args.question, primary_k=args.k)
+    resp = answer_question(args.question, primary_k=args.k, mode=args.mode)
     print("=" * 70)
     print(f"السؤال: {resp.question}")
     if resp.detected_refs:

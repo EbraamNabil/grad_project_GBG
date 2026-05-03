@@ -10,9 +10,13 @@ from pydantic import BaseModel, Field
 
 class QuestionRequest(BaseModel):
     question: str
+    mode: str = Field(
+        default="user",
+        description="'user' (general public, conservative) or 'lawyer' (analytical assistant).",
+    )
     primary_k: Optional[int] = Field(
         default=None,
-        description="Override PRIMARY_K from app/rag.py for this query.",
+        description="Override the per-mode default top-K for vector search.",
     )
 
 
