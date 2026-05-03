@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from openai import chat
 import requests
 import streamlit as st
 import time
@@ -417,7 +418,7 @@ button[title="Main menu"]:hover {
 """,
     unsafe_allow_html=True,
 )
-
+  
 
 # ─────────────────────────────────────────────────────────────
 # HIGHLIGHT KEYWORDS
@@ -585,6 +586,43 @@ st.markdown(
 
 for chat in st.session_state["chat_history"]:
 
+    # ─────────────────────────────────────
+    # TIMING METRICS
+    # ─────────────────────────────────────
+
+    elapsed = chat.get("elapsed_ms", {})
+
+    if elapsed:
+
+        total_time = sum(elapsed.values())
+
+        st.caption(
+            f"⏱️ التوجيه: {elapsed.get('route',0)} ms · "
+            f"التضمين: {elapsed.get('embed',0)} ms · "
+            f"الاسترجاع: {elapsed.get('retrieve',0)} ms · "
+            f"التوليد: {elapsed.get('generate',0)} ms · "
+            f"الإجمالي: {total_time} ms"
+        )
+
+
+    # ─────────────────────────────────────
+    # EXPLICIT REFERENCES
+    # ─────────────────────────────────────
+
+    detected_refs = chat.get("detected_refs", [])
+
+    if detected_refs:
+
+        refs_str = "، ".join(
+            f"المادة {n}"
+            for n in detected_refs
+        )
+
+        st.info(
+            f"📌 تم رصد إشارة صريحة إلى: {refs_str}"
+        )
+        
+        
     # USER MESSAGE
     st.markdown(
         f"""
@@ -618,7 +656,10 @@ for chat in st.session_state["chat_history"]:
     )
 
 
+    # ─────────────────────────────────────
     # SOURCES
+    # ─────────────────────────────────────
+
     with st.expander(
         f"📚 المصادر المرجعية ({len(chat['sources'])})",
         expanded=False
@@ -626,15 +667,35 @@ for chat in st.session_state["chat_history"]:
 
         for source in chat["sources"]:
 
+            source_type = source.get("source", "primary")
+            
+            node_color = {
+            "primary": "#3b82f6",
+            "cross_ref": "#22c55e",
+            "definition": "#a855f7",
+            "explicit": "#ff4b4b",
+        }.get(source_type, "#3b82f6")
+
+            source_label = {
+                "explicit": "📌 مادة مطلوبة صراحة",
+                "primary": "🎯 نتيجة أساسية",
+                "definition": "📖 تعريف موسع",
+                "cross_ref": "🔗 مادة مُحال إليها",
+            }.get(source_type, "📄 مصدر قانوني")
+
             st.markdown(
                 f"""
 <div class="source-card">
 
-### المادة {source['article']}
+### {source_label} — المادة {source['article']}
 
 **درجة التشابه:** {source['score']:.3f}
 
-<br>
+<small style="color:#999">
+كلما زادت الدرجة زاد ارتباط المادة بالسؤال.
+</small>
+
+<br><br>
 
 {highlight_keywords(source['excerpt'], chat['question'])}
 
@@ -642,6 +703,7 @@ for chat in st.session_state["chat_history"]:
 """,
                 unsafe_allow_html=True,
             )
+   
 
     # ─────────────────────────────────────
     # Suggested Questions
@@ -703,7 +765,7 @@ for chat in st.session_state["chat_history"]:
                     id=article_id,
                     label=f"مادة {source['article']}",
                     size=24,
-                    color="#3b82f6"
+                    color=node_color
                 )
             )
 
@@ -813,10 +875,27 @@ if (submit or auto_ask) and question.strip():
             "http://127.0.0.1:8000/ask",
             json={
                 "question": question.strip()
-            }
+            },
+            timeout=60
+            
         )
 
         response = api_response.json()
+        
+        if api_response.status_code != 200:
+
+            st.error("حدث خطأ أثناء الاتصال بالـ API")
+
+            st.stop() 
+        
+        if not response.get("sources"):
+            thinking_placeholder.empty()
+
+            st.warning(
+                "لم نجد مواد قانونية مرتبطة بالسؤال. حاول إعادة صياغته."
+            )
+
+            st.stop()
 
         thinking_placeholder.empty()
 
@@ -855,7 +934,9 @@ if (submit or auto_ask) and question.strip():
             {
                 "question": question,
                 "answer": full_answer,
-                "sources": response["sources"]
+                "sources": response["sources"],
+                "elapsed_ms": response.get("elapsed_ms", {}),
+               "detected_refs": response.get("detected_refs" , [])
             }
         )
 
