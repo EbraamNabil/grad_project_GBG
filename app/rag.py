@@ -129,18 +129,51 @@ def extract_article_refs_from_query(question: str) -> list[int]:
     return sorted(refs)
 
 
-def _fetch_articles_by_numbers(session, numbers: list[int]) -> list[RetrievedChunk]:
-    """Direct Cypher lookup by article number — no fuzziness, no LLM cost."""
+
+def _fetch_articles_by_numbers(
+    session,
+    numbers: list[int]
+) -> list[RetrievedChunk]:
+
     if not numbers:
         return []
+
     result = session.run(
-        "MATCH (a:Article) WHERE a.number IN $nums "
-        "RETURN a AS node, labels(a) AS labels, a.number AS num "
-        "ORDER BY a.number",
+        """
+        MATCH (a:Article)-[:HAS_SEGMENT]->(s:ArticleSegment)
+
+        WHERE a.number IN $nums
+
+        RETURN
+            s AS node,
+            a.number AS article_num
+
+        ORDER BY a.number, s.segment_index
+        """,
         nums=numbers,
     )
-    return [_node_to_chunk(r["node"], "Article", score=1.0, source="explicit")
-            for r in result]
+
+    chunks = []
+
+    for r in result:
+
+        node = r["node"]
+
+        chunks.append(
+            RetrievedChunk(
+                node_id=node.get("node_id", ""),
+                node_type="ArticleSegment",
+                article_number=r["article_num"],
+                breadcrumb=f"المادة {r['article_num']}",
+                text=node.get("text", ""),
+                score=1.0,
+                source="explicit",
+            )
+        )
+
+    return chunks
+
+
 
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
@@ -245,6 +278,70 @@ def _dedupe_and_cap(chunks: list[RetrievedChunk], cap: int) -> list[RetrievedChu
     return out
 
 
+
+def _fetch_definitions(session, question: str) -> list[RetrievedChunk]:
+            result = session.run(
+                """
+                MATCH (d:Definition)
+
+                WHERE
+                    $question CONTAINS d.term
+                    OR any(v IN d.term_variants
+                            WHERE $question CONTAINS v)
+
+                RETURN d AS node
+                LIMIT 5
+                """,
+                question=question,
+            )
+
+            return [
+                _node_to_chunk(
+                    r["node"],
+                    "Definition",
+                    score=1.0,
+                    source="definition"
+                )
+                for r in result 
+            ]
+
+
+
+
+def _fetch_related_articles(
+    session,
+    article_numbers: list[int]
+) -> list[RetrievedChunk]:
+
+    if not article_numbers:
+        return []
+
+    result = session.run(
+        """
+        MATCH (a:Article)-[:REFERENCES]->(target:Article)
+
+        WHERE a.number IN $nums
+
+        RETURN DISTINCT target AS node
+
+        LIMIT 10
+        """,
+        nums=article_numbers,
+    )
+
+    return [
+        _node_to_chunk(
+            r["node"],
+            "Article",
+            score=1.0,
+            source="cross_ref"
+        )
+        for r in result
+    ]
+
+
+            
+            
 # ── Prompt construction ───────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """أنت مساعد قانوني متخصص في قانون العمل المصري رقم 14 لسنة 2025.
@@ -309,10 +406,21 @@ def _call_chat(question: str, chunks: list[RetrievedChunk]) -> str:
 
 # ── Public entry point ────────────────────────────────────────────────────────
   
-  
 FULL_ARTICLE_RX = re.compile(
     r"(اعرض|هات|أظهر|نص|كامل|بالكامل).*المادة"
 )
+
+DEFINITION_RX = re.compile(
+    r"(ما\s+هو|ما\s+تعريف|عرف|تعريف|معنى)"
+)
+  
+
+REFERENCE_RX = re.compile(
+    r"(مرتبطة|مرتبطة\s+ب|تشير|تحيل|ذات\s+صلة)"
+)
+
+  
+
 
 def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
     elapsed: dict[str, int] = {}
@@ -324,6 +432,19 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
    
     full_article_mode = bool(
         FULL_ARTICLE_RX.search(question))
+    
+   
+    definition_mode = bool(
+        DEFINITION_RX.search(question)
+    )
+    
+    
+    reference_mode = bool(
+        REFERENCE_RX.search(question)
+    )
+
+
+
 
     # Step 1 — embed
     t0 = time.perf_counter()
@@ -334,8 +455,35 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
     t0 = time.perf_counter()
     with make_neo4j_driver() as drv, drv.session() as session:
         explicit = _fetch_articles_by_numbers(session, detected_refs) if detected_refs else []
-        primary = _vector_search(session, embedding, primary_k)
+        
+        
+        graph_definitions = []
+        
+        
 
+        if definition_mode:
+
+            graph_definitions = _fetch_definitions(
+                session,
+                question
+            )
+
+       
+        graph_references = []
+
+        if reference_mode and detected_refs:
+
+            graph_references = _fetch_related_articles(
+                session,
+                detected_refs
+            )
+
+
+        
+
+
+        primary = _vector_search(session, embedding, primary_k)
+         
         # Graph-expand from BOTH explicit and primary articles
         seed_ids = list({
             c.node_id for c in (explicit + primary) if c.node_type == "Article"
@@ -345,7 +493,13 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
     elapsed["retrieve"] = int((time.perf_counter() - t0) * 1000)
 
     # Order: explicit (highest priority) → primary → definitions → cross-refs
-    chunks = _dedupe_and_cap(explicit + primary + defs + refs, cap=MAX_CONTEXT_CHUNKS)
+    chunks = _dedupe_and_cap(explicit 
+                             + graph_definitions 
+                             + graph_references
+                             + primary 
+                             + defs 
+                             + refs,
+                             cap=MAX_CONTEXT_CHUNKS)
     
     if full_article_mode and explicit:
 
@@ -353,6 +507,8 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
             chunk.text
             for chunk in explicit
         )
+     
+        
 
         return RagResponse(
             question=question,
