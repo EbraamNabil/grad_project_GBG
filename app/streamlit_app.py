@@ -40,6 +40,45 @@ SOURCE_LABELS = {
     "cross_ref": "🔗 مادة مُحال إليها",
 }
 
+# ─────────────────────────────────────────────────────────────
+# MODES
+# ─────────────────────────────────────────────────────────────
+MODE_USER = "user"
+MODE_LAWYER = "lawyer"
+
+MODE_META = {
+    MODE_USER: {
+        "label": "👤 المستخدم العادي",
+        "tagline": "أسئلة عامة عن قانون العمل",
+        "description": "إجابات موجزة مبنية حصراً على نصوص القانون. مناسب للعمال وأصحاب العمل لمعرفة حقوقهم وواجباتهم.",
+        "color": "#3b82f6",
+        "placeholder": "مثال: ما هي مدة الإجازة السنوية للعامل؟",
+        "examples": [
+            "ما هو تعريف الأجر؟",
+            "ما هي مدة الإجازة السنوية للعامل؟",
+            "ما تنص عليه المادة 48؟",
+            "ما هي عقوبة مخالفة المادة 70؟",
+            "متى يجوز فصل العامل؟",
+            "المواد 145 و 146 و 147",
+        ],
+    },
+    MODE_LAWYER: {
+        "label": "⚖️ مساعد المحامي",
+        "tagline": "تحليل قضايا، مراجعة حجج خصم، توصيات استراتيجية",
+        "description": "مساعد قانوني تحليلي للمحامين الممارسين. يقدم رأياً قانونياً مبنياً على نصوص القانون مع تحليل استراتيجي وتقييم صادق لنقاط القوة والضعف.",
+        "color": "#ff4b4b",
+        "placeholder": "مثال: موكلي عامل تم فصله بعد 7 سنوات بحجة سوء السلوك دون تحقيق. ما خياراتنا القانونية؟",
+        "examples": [
+            "موكلي عامل تم فصله بعد 7 سنوات بحجة سوء السلوك دون تحقيق. ما خياراتنا القانونية؟",
+            "محامي الطرف الآخر يستند إلى المادة 145 لتبرير وقف موكلي. كيف نرد؟",
+            "قارن بين العقد محدد المدة وغير محدد المدة من حيث الإنهاء",
+            "ما الفرق بين الفصل التأديبي والفصل لانخفاض الأداء؟",
+            "موكّلتي عاملة منزلية تمّ خصم أجر شهر كامل منها بسبب كسر إناء — هل هذا قانوني؟",
+            "حلل إمكانية الطعن في قرار صاحب العمل بنقل موكلي إلى مدينة أخرى",
+        ],
+    },
+}
+
 SUGGESTED_QUESTIONS = {
     "أجر": [
         "ما الفرق بين الأجر الأساسي والمتغير؟",
@@ -283,6 +322,8 @@ if "auto_ask" not in st.session_state:
     st.session_state["auto_ask"] = False
 if "last_voice_text" not in st.session_state:
     st.session_state["last_voice_text"] = ""
+if "mode" not in st.session_state:
+    st.session_state["mode"] = MODE_USER
 
 # ─────────────────────────────────────────────────────────────
 # SIDEBAR
@@ -310,17 +351,10 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown("## 💡 أمثلة على الأسئلة")
-    examples = [
-        "ما هو تعريف الأجر؟",
-        "ما هي مدة الإجازة السنوية للعامل؟",
-        "ما تنص عليه المادة 48؟",
-        "ما هي عقوبة مخالفة المادة 70؟",
-        "متى يجوز فصل العامل؟",
-        "المواد 145 و 146 و 147",
-    ]
-    for ex in examples:
-        if st.button(ex, key=f"ex_{ex}", use_container_width=True):
+    _current_mode_meta = MODE_META[st.session_state["mode"]]
+    st.markdown(f"## 💡 أمثلة — {_current_mode_meta['label']}")
+    for ex in _current_mode_meta["examples"]:
+        if st.button(ex, key=f"ex_{st.session_state['mode']}_{ex[:30]}", use_container_width=True):
             st.session_state["question"] = ex
             st.session_state["auto_ask"] = True
             st.rerun()
@@ -363,9 +397,87 @@ st.markdown(
 
 
 # ─────────────────────────────────────────────────────────────
+# MODE SELECTOR (front-and-center)
+# ─────────────────────────────────────────────────────────────
+st.markdown(
+    """
+<div style="
+    text-align:center;
+    margin: 10px 0 5px 0;
+    color: #ccc;
+    font-size: 0.95rem;
+">
+    اختر وضع الاستخدام لتلقّي إجابات مناسبة لاحتياجك:
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+mode_col_l, mode_col_c, mode_col_r = st.columns([1, 2, 1])
+with mode_col_c:
+    mode_label = st.selectbox(
+        "وضع الاستخدام",
+        options=[MODE_USER, MODE_LAWYER],
+        format_func=lambda m: MODE_META[m]["label"],
+        index=[MODE_USER, MODE_LAWYER].index(st.session_state["mode"]),
+        key="mode_selector",
+        label_visibility="collapsed",
+    )
+    if mode_label != st.session_state["mode"]:
+        st.session_state["mode"] = mode_label
+        st.rerun()
+
+# Mode description card
+_meta = MODE_META[st.session_state["mode"]]
+st.markdown(
+    f"""
+<div style="
+    max-width: 720px;
+    margin: 8px auto 28px auto;
+    padding: 16px 20px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%);
+    border: 1px solid {_meta['color']}33;
+    border-right: 4px solid {_meta['color']};
+    text-align: right;
+">
+    <div style="font-weight:700; font-size:1.05rem; color:{_meta['color']}; margin-bottom:6px;">
+        {_meta['label']} — {_meta['tagline']}
+    </div>
+    <div style="color:#ccc; line-height:1.7; font-size:0.95rem;">
+        {_meta['description']}
+    </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# ─────────────────────────────────────────────────────────────
 # CHAT HISTORY RENDERING
 # ─────────────────────────────────────────────────────────────
 for chat in st.session_state["chat_history"]:
+    chat_mode = chat.get("mode", MODE_USER)
+    chat_meta = MODE_META.get(chat_mode, MODE_META[MODE_USER])
+    st.markdown(
+        f"""
+<div style="
+    display:inline-block;
+    padding:4px 12px;
+    border-radius:12px;
+    background:{chat_meta['color']}22;
+    border:1px solid {chat_meta['color']}66;
+    color:{chat_meta['color']};
+    font-size:0.8rem;
+    font-weight:600;
+    margin-bottom:8px;
+">
+    {chat_meta['label']}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
     elapsed = chat.get("elapsed_ms", {})
     if elapsed:
         total_time = sum(elapsed.values())
@@ -497,14 +609,18 @@ if voice_text and voice_text != st.session_state["last_voice_text"]:
 # ─────────────────────────────────────────────────────────────
 # QUESTION INPUT
 # ─────────────────────────────────────────────────────────────
+_active_meta = MODE_META[st.session_state["mode"]]
 question = st.text_area(
     "اكتب سؤالك القانوني بالعربية:",
     value=st.session_state.get("question", ""),
-    height=120,
-    placeholder="مثال: ما هي مدة الإجازة السنوية للعامل؟",
+    height=140 if st.session_state["mode"] == MODE_LAWYER else 120,
+    placeholder=_active_meta["placeholder"],
 )
 
-submit = st.button("⚖️ اسأل الآن", use_container_width=True)
+submit_label = (
+    "⚖️ حلّل القضية" if st.session_state["mode"] == MODE_LAWYER else "⚖️ اسأل الآن"
+)
+submit = st.button(submit_label, use_container_width=True)
 auto_ask = st.session_state.get("auto_ask", False)
 
 
@@ -525,8 +641,12 @@ if (submit or auto_ask) and question.strip():
     try:
         api_response = requests.post(
             f"{API_BASE_URL}/ask",
-            json={"question": question.strip(), "primary_k": primary_k},
-            timeout=120,
+            json={
+                "question": question.strip(),
+                "mode": st.session_state["mode"],
+                "primary_k": primary_k,
+            },
+            timeout=180,
         )
 
         if api_response.status_code != 200:
@@ -581,6 +701,7 @@ if (submit or auto_ask) and question.strip():
                 "sources": response["sources"],
                 "elapsed_ms": response.get("elapsed_ms", {}),
                 "detected_refs": response.get("detected_refs", []),
+                "mode": st.session_state["mode"],
             }
         )
         st.session_state["auto_ask"] = False
