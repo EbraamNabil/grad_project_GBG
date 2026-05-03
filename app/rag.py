@@ -26,6 +26,13 @@ from pathlib import Path
 
 import regex as re
 
+import json
+from pathlib import Path
+
+CHUNKS_PATH = Path("data/chunks_embedded.jsonl")
+
+
+
 # Ensure project root is importable so we can reuse src/embed_azure & src/load_neo4j.
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "src"))
@@ -130,6 +137,9 @@ def extract_article_refs_from_query(question: str) -> list[int]:
 
 
 
+
+
+
 def _fetch_articles_by_numbers(
     session,
     numbers: list[int]
@@ -138,40 +148,54 @@ def _fetch_articles_by_numbers(
     if not numbers:
         return []
 
-    result = session.run(
-        """
-        MATCH (a:Article)-[:HAS_SEGMENT]->(s:ArticleSegment)
-
-        WHERE a.number IN $nums
-
-        RETURN
-            s AS node,
-            a.number AS article_num
-
-        ORDER BY a.number, s.segment_index
-        """,
-        nums=numbers,
-    )
-
     chunks = []
 
-    for r in result:
+    for number in numbers:
 
-        node = r["node"]
+        result = session.run(
+            """
+            MATCH path = (start:Article)-[:NEXT*0..50]->(next)
 
-        chunks.append(
-            RetrievedChunk(
-                node_id=node.get("node_id", ""),
-                node_type="ArticleSegment",
-                article_number=r["article_num"],
-                breadcrumb=f"المادة {r['article_num']}",
-                text=node.get("text", ""),
-                score=1.0,
-                source="explicit",
-            )
+            WHERE start.number = $num
+
+            WITH nodes(path) AS nodes_list
+
+            UNWIND nodes_list AS node
+
+            WITH DISTINCT node
+
+            WHERE node.number = $num
+
+            RETURN node
+
+            ORDER BY node.node_id
+            """,
+            num=number,
         )
 
+        for r in result:
+
+            node = r["node"]
+
+            chunks.append(
+                RetrievedChunk(
+                    node_id=node.get("node_id", ""),
+                    node_type="Article",
+                    article_number=node.get("number"),
+                    breadcrumb=f"المادة {node.get('number')}",
+                    text=node.get("text", ""),
+                    score=1.0,
+                    source="explicit",
+                )
+            )
+
     return chunks
+
+
+
+
+
+
 
 
 
