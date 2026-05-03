@@ -584,7 +584,9 @@ st.markdown(
 # ─────────────────────────────────────────────────────────────
 
 
-for chat in st.session_state["chat_history"]:
+for chat_idx, chat in enumerate(st.session_state["chat_history"]):
+
+
 
     # ─────────────────────────────────────
     # TIMING METRICS
@@ -721,7 +723,10 @@ for chat in st.session_state["chat_history"]:
 
             if st.button(
                 suggestion,
-                key=f"suggestion_{idx}_{chat['question']}"
+                
+            key=f"suggestion_{chat_idx}_{idx}_{chat['question']}"
+
+
             ):
 
                 st.session_state["question"] = suggestion
