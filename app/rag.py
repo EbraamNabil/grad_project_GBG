@@ -308,6 +308,11 @@ def _call_chat(question: str, chunks: list[RetrievedChunk]) -> str:
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
+  
+  
+FULL_ARTICLE_RX = re.compile(
+    r"(اعرض|هات|أظهر|نص|كامل|بالكامل).*المادة"
+)
 
 def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
     elapsed: dict[str, int] = {}
@@ -316,6 +321,9 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
     t0 = time.perf_counter()
     detected_refs = extract_article_refs_from_query(question)
     elapsed["route"] = max(1, int((time.perf_counter() - t0) * 1000))
+   
+    full_article_mode = bool(
+        FULL_ARTICLE_RX.search(question))
 
     # Step 1 — embed
     t0 = time.perf_counter()
@@ -338,6 +346,22 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
 
     # Order: explicit (highest priority) → primary → definitions → cross-refs
     chunks = _dedupe_and_cap(explicit + primary + defs + refs, cap=MAX_CONTEXT_CHUNKS)
+    
+    if full_article_mode and explicit:
+
+        full_text = "\n\n".join(
+            chunk.text
+            for chunk in explicit
+        )
+
+        return RagResponse(
+            question=question,
+            answer=full_text,
+            chunks=explicit,
+            detected_refs=detected_refs,
+            elapsed_ms=elapsed,
+        )
+
 
     # Step 3 — generate
     t0 = time.perf_counter()
