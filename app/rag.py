@@ -406,9 +406,12 @@ def _call_chat(question: str, chunks: list[RetrievedChunk]) -> str:
 
 # ── Public entry point ────────────────────────────────────────────────────────
   
+
 FULL_ARTICLE_RX = re.compile(
-    r"(اعرض|هات|أظهر|نص|كامل|بالكامل).*المادة"
+    r"(اعرض|هات|أظهر|نص)\s+المادة|المادة.*(كامل|بالكامل|كاملة)"
 )
+
+
 
 DEFINITION_RX = re.compile(
     r"(ما\s+هو|ما\s+تعريف|عرف|تعريف|معنى)"
@@ -432,6 +435,12 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
    
     full_article_mode = bool(
         FULL_ARTICLE_RX.search(question))
+    
+    print("QUESTION:", question)
+    print("FULL ARTICLE MODE:", full_article_mode)
+    print("DETECTED REFS:", detected_refs)
+
+
     
    
     definition_mode = bool(
@@ -501,6 +510,11 @@ def answer_question(question: str, primary_k: int = PRIMARY_K) -> RagResponse:
                              + refs,
                              cap=MAX_CONTEXT_CHUNKS)
     
+    
+    
+    print("EXPLICIT CHUNKS:", len(explicit))
+
+
     if full_article_mode and explicit:
 
         full_text = "\n\n".join(
