@@ -1,4 +1,4 @@
-# ⚖️ AI Lawyer — Egyptian Labor Law GraphRAG Assistant
+# ⚖️ WorkLaw_Copilot — Egyptian Labor Law GraphRAG Assistant
 
 <div align="center">
 
@@ -144,6 +144,67 @@ Using interactive Neo4j-style graph rendering.
 ## ⚡ Streaming Responses
 
 The assistant streams generated responses gradually for better UX.
+
+---
+# 👥 Dual Interaction Modes
+
+The assistant supports two specialized operating modes designed for different user types.
+
+## 👤 User Mode — General Public
+
+A strict and conservative legal assistant for non-specialists.
+
+Features:
+
+* Citation-focused legal answers
+* Direct article retrieval
+* Simplified legal explanations
+* Hallucination-reduced responses
+* Deterministic legal prompting
+
+Example Use Cases:
+
+```arabic
+
+ما تعريف العامل؟
+هل يحق للعامل إجازة مرضية؟
+```
+## ⚖️ Lawyer Mode — Legal Associate Assistant
+
+An advanced analytical mode designed for lawyers and legal professionals.
+
+Features:
+
+Strategic legal analysis
+Legal argument evaluation
+Cross-article reasoning
+Case-oriented explanations
+Context-aware GraphRAG expansion
+Professional legal tone
+
+Example Use Cases:
+```arabic
+ما نقاط الضعف في موقف صاحب العمل؟
+حلل مدى قانونية فصل العامل في هذه الحالة
+```
+---
+
+## 🧠 Why Multiple Modes?
+
+Different users require different levels of legal reasoning.
+
+The system dynamically adjusts:
+
+Retrieval depth
+Context size
+Graph expansion budget
+Prompting strategy
+Answer style and detail level
+
+This enables both:
+
+Safe public-facing legal assistance
+Advanced legal analytical support
 
 ---
 
